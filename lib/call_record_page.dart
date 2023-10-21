@@ -1,3 +1,4 @@
+import 'package:call_recorder_app/call_record_service.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:phone_state/phone_state.dart';
@@ -12,6 +13,7 @@ class CallRecordPage extends StatefulWidget {
 class _CallRecordPageState extends State<CallRecordPage> {
   String statusText = "Initializing";
   bool hasPermission = false;
+  bool isRecording = false;
   PhoneState phoneStateStatus = PhoneState.nothing();
 
   @override
@@ -21,9 +23,9 @@ class _CallRecordPageState extends State<CallRecordPage> {
   }
 
   void initAll() async {
-    if (!await requestPermissions()) {
+    if (!await requestCallPermissions() || !await requestRecordPermissions()) {
       setState(() {
-        statusText = "No permission found";
+        statusText = "No permission granted";
       });
     }
 
@@ -37,6 +39,13 @@ class _CallRecordPageState extends State<CallRecordPage> {
         phoneStateStatus = status;
         statusText = getPhoneStateText();
       });
+      if (status.status == PhoneStateStatus.CALL_ENDED) {
+        CallRecordService.getInstance().stopRecord().then((value) {
+          setState(() {
+            isRecording = false;
+          });
+        });
+      }
     });
   }
 
@@ -44,7 +53,7 @@ class _CallRecordPageState extends State<CallRecordPage> {
     return '${phoneStateStatus.number} ${phoneStateStatus.status.name}';
   }
 
-  Future<bool> requestPermissions() async {
+  Future<bool> requestCallPermissions() async {
     var status = await Permission.phone.request();
     return switch (status) {
       PermissionStatus.denied ||
@@ -54,6 +63,28 @@ class _CallRecordPageState extends State<CallRecordPage> {
         false,
       PermissionStatus.provisional || PermissionStatus.granted => true
     };
+  }
+
+  Future<bool> requestRecordPermissions() async {
+    var statusAudio = await Permission.audio.request();
+    var statusMicrophone = await Permission.microphone.request();
+    return switch (statusAudio) {
+          PermissionStatus.denied ||
+          PermissionStatus.restricted ||
+          PermissionStatus.limited ||
+          PermissionStatus.permanentlyDenied =>
+            false,
+          PermissionStatus.provisional || PermissionStatus.granted => true
+        } &&
+        switch (statusMicrophone) {
+          PermissionStatus.denied ||
+          PermissionStatus.restricted ||
+          PermissionStatus.limited ||
+          PermissionStatus.permanentlyDenied =>
+            false,
+          PermissionStatus.provisional || PermissionStatus.granted => true
+        };
+    ;
   }
 
   @override
@@ -67,11 +98,27 @@ class _CallRecordPageState extends State<CallRecordPage> {
           hasPermission &&
                   phoneStateStatus.status != PhoneStateStatus.NOTHING &&
                   phoneStateStatus.status != PhoneStateStatus.CALL_ENDED
-              ? TextButton(
-                  onPressed: () {
-                    // TODO: Record the call here
-                  },
-                  child: const Text("Record"))
+              ? isRecording
+                  ? TextButton(
+                      onPressed: () async {
+                        await CallRecordService.getInstance().stopRecord();
+                        setState(() {
+                          isRecording = false;
+                        });
+                      },
+                      child: const Text("Stop Recording"))
+                  : TextButton(
+                      onPressed: () async {
+                        if (phoneStateStatus.number == null) {
+                          return;
+                        }
+                        setState(() {
+                          isRecording = true;
+                        });
+                        await CallRecordService.getInstance()
+                            .startRecord(phoneStateStatus.number ?? "");
+                      },
+                      child: const Text("Start Record"))
               : const Text("Waiting for a call")
         ],
       ),
